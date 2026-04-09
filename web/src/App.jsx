@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { get, postFile, postForm } from './api'
+import { get, postFile, postForm, postJson } from './api'
 
 function StatCard({ label, value }) {
   return (
@@ -70,6 +70,19 @@ export default function App() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [search, setSearch] = useState('')
 
+  // Virality campaign state
+  const [campaigns, setCampaigns] = useState([])
+  const [vCampaignName, setVCampaignName] = useState('')
+  const [vTargetUrl, setVTargetUrl] = useState('')
+  const [vAccounts, setVAccounts] = useState('')
+  const [vWaveCount, setVWaveCount] = useState(3)
+  const [vWaveGap, setVWaveGap] = useState(600)
+  const [vActionMix, setVActionMix] = useState({ like: 60, comment: 20, save: 15, share: 5 })
+  const [vCommentBank, setVCommentBank] = useState('Amazing! 🔥\nLove this! ❤️\nThis is incredible!\nSo good!\nAbsolutely stunning!')
+  const [vLiveMode, setVLiveMode] = useState(false)
+  const [selectedCampaign, setSelectedCampaign] = useState('')
+  const [campaignProgress, setCampaignProgress] = useState(null)
+
   const selectedBatchId = useMemo(() => Number(selectedBatch || 0), [selectedBatch])
   const onlineDevices = useMemo(
     () => devices.filter((d) => d.status === 'online').map((d) => d.device_id),
@@ -96,12 +109,13 @@ export default function App() {
   }, [servers])
 
   async function refreshAll() {
-    const [batchData, deviceData, serverData, jobData, eventData] = await Promise.all([
+    const [batchData, deviceData, serverData, jobData, eventData, campaignData] = await Promise.all([
       get('/batches'),
       get('/devices'),
       get('/servers'),
       get('/jobs'),
-      get('/events')
+      get('/events'),
+      get('/virality/campaigns'),
     ])
 
     setBatches(batchData)
@@ -109,6 +123,7 @@ export default function App() {
     setServers(serverData)
     setJobs(jobData)
     setEvents(eventData)
+    setCampaigns(campaignData)
 
     if (!selectedBatch && batchData.length) {
       setSelectedBatch(String(batchData[0].id))
@@ -550,6 +565,248 @@ export default function App() {
     )
   }
 
+  function vMixTotal() {
+    return Object.values(vActionMix).reduce((s, v) => s + Number(v), 0)
+  }
+
+  function renderViralityTab() {
+    const accountLines = vAccounts.trim().split('\n').filter(Boolean)
+    const parsedAccounts = accountLines.map((line) => {
+      const [device_id, account_id] = line.split('|').map((s) => s.trim())
+      return { device_id: device_id || '', account_id: account_id || '' }
+    }).filter((a) => a.device_id && a.account_id)
+
+    const mixTotal = vMixTotal()
+    const mixValid = mixTotal === 100
+
+    async function handleCreateCampaign() {
+      if (!vCampaignName || !vTargetUrl || !parsedAccounts.length) {
+        setNotice('Campaign name, target URL, and at least one account are required.')
+        return
+      }
+      if (!mixValid) {
+        setNotice(`Action mix must total 100% (currently ${mixTotal}%).`)
+        return
+      }
+      await runAction('Create Campaign', () =>
+        postJson('/virality/campaigns', {
+          name: vCampaignName,
+          target_url: vTargetUrl,
+          accounts: parsedAccounts,
+          wave_count: Number(vWaveCount),
+          wave_gap_seconds: Number(vWaveGap),
+          action_mix: Object.fromEntries(
+            Object.entries(vActionMix).map(([k, v]) => [k, Number(v)])
+          ),
+          comment_bank: vCommentBank.split('\n').map((s) => s.trim()).filter(Boolean),
+        })
+      )
+    }
+
+    async function handleLoadProgress() {
+      if (!selectedCampaign) return
+      try {
+        const data = await get(`/virality/campaigns/${selectedCampaign}/progress`)
+        setCampaignProgress(data)
+      } catch (e) {
+        setNotice(`Progress load failed: ${e.message}`)
+      }
+    }
+
+    return (
+      <section className="panel">
+        <SectionTitle
+          title="Virality Campaigns"
+          subtitle="Coordinate multi-account wave execution to spike engagement velocity and trigger the Instagram algorithm."
+        />
+
+        {/* Campaign builder */}
+        <div className="virality-grid">
+          {/* Left — Config */}
+          <div className="virality-config">
+            <h3 className="sub-heading">Campaign Setup</h3>
+
+            <div className="form-grid form-grid-2">
+              <div className="field">
+                <label>Campaign Name</label>
+                <input value={vCampaignName} onChange={(e) => setVCampaignName(e.target.value)} placeholder="e.g. Product Launch Wave" />
+              </div>
+              <div className="field">
+                <label>Target Post / Reel URL</label>
+                <input value={vTargetUrl} onChange={(e) => setVTargetUrl(e.target.value)} placeholder="https://www.instagram.com/p/..." />
+              </div>
+            </div>
+
+            <div className="form-grid form-grid-2" style={{ marginTop: 10 }}>
+              <div className="field">
+                <label>Wave Count</label>
+                <input type="number" min={1} max={20} value={vWaveCount} onChange={(e) => setVWaveCount(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Wave Gap (seconds)</label>
+                <input type="number" min={0} value={vWaveGap} onChange={(e) => setVWaveGap(e.target.value)} />
+              </div>
+            </div>
+
+            {/* Action mix */}
+            <h3 className="sub-heading" style={{ marginTop: 14 }}>Action Mix <span className={`mix-total ${mixValid ? 'mix-ok' : 'mix-warn'}`}>{mixTotal}%</span></h3>
+            <div className="mix-grid">
+              {Object.entries(vActionMix).map(([action, pct]) => (
+                <div key={action} className="mix-row">
+                  <span className="mix-label">{action}</span>
+                  <input
+                    type="range" min={0} max={100} value={pct}
+                    onChange={(e) => setVActionMix((prev) => ({ ...prev, [action]: Number(e.target.value) }))}
+                  />
+                  <span className="mix-pct">{pct}%</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="field" style={{ marginTop: 10 }}>
+              <label>Comment Bank (one per line)</label>
+              <textarea
+                rows={4}
+                value={vCommentBank}
+                onChange={(e) => setVCommentBank(e.target.value)}
+                placeholder="Amazing! 🔥\nLove this! ❤️"
+              />
+            </div>
+
+            <label className="toggle" style={{ marginTop: 10 }}>
+              <input type="checkbox" checked={vLiveMode} onChange={(e) => setVLiveMode(e.target.checked)} />
+              Live Appium mode (uncheck = mock)
+            </label>
+          </div>
+
+          {/* Right — Account list */}
+          <div className="virality-accounts">
+            <h3 className="sub-heading">Account List <span className="muted-text">({parsedAccounts.length} loaded)</span></h3>
+            <p className="hint-text">Paste one account per line in format:<br /><code>device_id | account_id</code></p>
+            <textarea
+              className="account-textarea"
+              rows={14}
+              value={vAccounts}
+              onChange={(e) => setVAccounts(e.target.value)}
+              placeholder={`emulator-5554 | @user1\nemulator-5556 | @user2\nemulator-5558 | @user3`}
+            />
+
+            {/* Wave preview */}
+            {parsedAccounts.length > 0 ? (
+              <div className="wave-preview">
+                <strong>Wave Distribution Preview</strong>
+                {Array.from({ length: Number(vWaveCount) }, (_, i) => {
+                  const count = Math.ceil((parsedAccounts.length - i) / Number(vWaveCount))
+                  return (
+                    <div key={i} className="wave-row">
+                      <span className="wave-badge">Wave {i + 1}</span>
+                      <span>{count > 0 ? count : 0} accounts</span>
+                      {i > 0 ? <span className="muted-text">+{vWaveGap}s gap</span> : <span className="muted-text">immediate</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="action-grid" style={{ marginTop: 14 }}>
+          <button
+            className="btn-primary"
+            disabled={loading || !vCampaignName || !vTargetUrl || parsedAccounts.length === 0 || !mixValid}
+            onClick={handleCreateCampaign}
+          >
+            Create Campaign
+          </button>
+          <button
+            disabled={loading || !selectedCampaign}
+            className="btn-primary"
+            onClick={() =>
+              runAction('Launch', () =>
+                postForm(`/virality/campaigns/${selectedCampaign}/launch`, {
+                  live_mode: String(vLiveMode),
+                })
+              )
+            }
+          >
+            Launch Selected
+          </button>
+          <button disabled={loading || !selectedCampaign} onClick={handleLoadProgress}>
+            View Progress
+          </button>
+        </div>
+
+        {/* Campaign list */}
+        <h3 className="sub-heading" style={{ marginTop: 18 }}>All Campaigns</h3>
+        {campaigns.length === 0 ? (
+          <div className="empty-box">No virality campaigns yet. Create one above.</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Select</th>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Target URL</th>
+                  <th>Accounts</th>
+                  <th>Waves</th>
+                  <th>Gap (s)</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {campaigns.map((c) => (
+                  <tr key={c.id} className={String(selectedCampaign) === String(c.id) ? 'row-selected' : ''}>
+                    <td>
+                      <input
+                        type="radio"
+                        style={{ width: 'auto', minHeight: 'auto', padding: 0 }}
+                        checked={String(selectedCampaign) === String(c.id)}
+                        onChange={() => setSelectedCampaign(String(c.id))}
+                      />
+                    </td>
+                    <td>{c.id}</td>
+                    <td><strong>{c.name}</strong></td>
+                    <td><a href={c.target_url} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>{c.target_url.slice(0, 50)}…</a></td>
+                    <td>{c.total_accounts}</td>
+                    <td>{c.wave_count}</td>
+                    <td>{c.wave_gap_seconds}</td>
+                    <td><span className={`badge ${c.status === 'done' ? 'badge-ok' : c.status === 'running' ? 'badge-run' : 'badge-off'}`}>{c.status}</span></td>
+                    <td style={{ fontSize: '0.8rem' }}>{c.created_at?.slice(0, 16)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Progress detail */}
+        {campaignProgress ? (
+          <div style={{ marginTop: 16 }}>
+            <h3 className="sub-heading">
+              Progress — {campaignProgress.campaign?.name}
+              <span className={`badge ${campaignProgress.campaign?.status === 'done' ? 'badge-ok' : 'badge-run'}`} style={{ marginLeft: 8 }}>
+                {campaignProgress.campaign?.status}
+              </span>
+            </h3>
+            <div className="form-grid" style={{ gap: 8, marginBottom: 10 }}>
+              {Object.entries(campaignProgress.summary || {}).map(([status, count]) => (
+                <StatCard key={status} label={status} value={count} />
+              ))}
+            </div>
+            <DataTable
+              columns={['wave_number', 'action', 'status', 'count']}
+              rows={campaignProgress.wave_breakdown || []}
+              emptyLabel="No wave data yet."
+            />
+          </div>
+        ) : null}
+      </section>
+    )
+  }
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -575,6 +832,7 @@ export default function App() {
         <StatCard label="Devices" value={devices.length} />
         <StatCard label="Online Devices" value={onlineDevices.length} />
         <StatCard label="Managed Servers" value={servers.length} />
+        <StatCard label="Campaigns" value={campaigns.length} />
       </section>
 
       <section className="panel top-tabs-panel">
@@ -591,6 +849,9 @@ export default function App() {
           <button className={activeView === 'monitor' ? 'tab active' : 'tab'} onClick={() => setActiveView('monitor')}>
             Monitoring
           </button>
+          <button className={activeView === 'virality' ? 'tab active tab-virality' : 'tab tab-virality'} onClick={() => setActiveView('virality')}>
+            🔥 Virality
+          </button>
           <div className="spacer" />
           <div className="status-inline">
             <span>Batch: {selectedBatch || 'None'}</span>
@@ -604,6 +865,7 @@ export default function App() {
       {activeView === 'workflow' ? renderWorkflowTab() : null}
       {activeView === 'devices' ? renderDevicesTab() : null}
       {activeView === 'monitor' ? renderMonitorTab() : null}
+      {activeView === 'virality' ? renderViralityTab() : null}
     </div>
   )
 }

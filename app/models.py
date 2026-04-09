@@ -16,6 +16,10 @@ class Intent(str, Enum):
     REPOST = "repost"
     SHARE = "share"
     LIKE_AND_COMMENT = "like_and_comment"
+    # Virality-specific intents
+    SAVE = "save"
+    WATCH_REEL = "watch_reel"
+    PROFILE_VISIT = "profile_visit"
 
 
 class Status(str, Enum):

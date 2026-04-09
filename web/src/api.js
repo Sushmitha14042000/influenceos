@@ -38,3 +38,13 @@ export async function postFile(path, file) {
   })
   return parseResponse(response)
 }
+
+export async function postJson(path, body) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  return parseResponse(response)
+}
+

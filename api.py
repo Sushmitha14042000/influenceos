@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from app.appium_servers import list_servers, start_server_for_device, stop_server_for_device
 from app.db import fetch_all, init_db
@@ -13,6 +14,12 @@ from app.importer import import_excel
 from app.planner import plan_batch
 from app.reports import generate_batch_report
 from app.runner import run_batch
+from app.virality import (
+    create_campaign as create_virality_campaign,
+    get_campaign_progress,
+    launch_campaign,
+    list_campaigns as list_virality_campaigns,
+)
 
 app = FastAPI(title="Automation Platform API", version="1.0.0")
 
@@ -130,3 +137,56 @@ def get_events(limit: int = 200) -> list[dict[str, object]]:
         [limit],
     )
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Virality Campaign endpoints
+# ---------------------------------------------------------------------------
+
+class ViralityCampaignCreate(BaseModel):
+    name: str
+    target_url: str
+    accounts: list[dict[str, str]]          # [{account_id, device_id}, ...]
+    wave_count: int = 3
+    wave_gap_seconds: int = 600
+    action_mix: dict[str, int] = {"like": 60, "comment": 20, "save": 15, "share": 5}
+    comment_bank: list[str] = []
+
+
+@app.get("/virality/campaigns")
+def virality_list_campaigns() -> list[dict[str, object]]:
+    return list_virality_campaigns()
+
+
+@app.post("/virality/campaigns")
+def virality_create_campaign(body: ViralityCampaignCreate) -> dict[str, int]:
+    comment_bank = body.comment_bank or [
+        "Amazing! 🔥", "Love this! ❤️", "This is incredible!",
+        "So good!", "Absolutely stunning!", "Can't stop watching this!",
+    ]
+    campaign_id = create_virality_campaign(
+        name=body.name,
+        target_url=body.target_url,
+        accounts=body.accounts,
+        wave_count=body.wave_count,
+        wave_gap_seconds=body.wave_gap_seconds,
+        action_mix=body.action_mix,
+        comment_bank=comment_bank,
+    )
+    return {"campaign_id": campaign_id}
+
+
+@app.post("/virality/campaigns/{campaign_id}/launch")
+def virality_launch_campaign(
+    campaign_id: int, live_mode: bool = Form(False)
+) -> dict[str, object]:
+    return launch_campaign(campaign_id, use_mock=(not live_mode))
+
+
+@app.get("/virality/campaigns/{campaign_id}/progress")
+def virality_campaign_progress(campaign_id: int) -> dict[str, object]:
+    progress = get_campaign_progress(campaign_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail=f"Campaign {campaign_id} not found")
+    return progress
+

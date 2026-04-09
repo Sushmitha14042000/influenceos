@@ -88,6 +88,34 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(job_id) REFERENCES jobs(id)
             );
+
+            CREATE TABLE IF NOT EXISTS virality_campaigns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                target_url TEXT NOT NULL,
+                total_accounts INTEGER DEFAULT 0,
+                wave_count INTEGER DEFAULT 3,
+                wave_gap_seconds INTEGER DEFAULT 600,
+                action_mix TEXT DEFAULT '{"like":60,"comment":20,"save":15,"share":5}',
+                comment_bank TEXT DEFAULT '["Amazing! 🔥","Love this! ❤️","This is incredible!","So good!","Absolutely stunning!"]',
+                status TEXT DEFAULT 'draft',
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS campaign_waves (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                wave_number INTEGER NOT NULL,
+                device_id TEXT NOT NULL,
+                account_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                comment_text TEXT,
+                status TEXT DEFAULT 'pending',
+                executed_at TEXT,
+                FOREIGN KEY(campaign_id) REFERENCES virality_campaigns(id)
+            );
             """
         )
         conn.commit()

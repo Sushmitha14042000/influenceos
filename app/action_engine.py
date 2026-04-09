@@ -91,6 +91,19 @@ class ActionEngine:
             if driver:
                 self._tap_share(driver)
             self._log(job_id, "Share action completed")
+        elif action == "save":
+            if driver:
+                self._tap_save(driver)
+            self._log(job_id, "Save action completed")
+        elif action == "watch_reel":
+            watch_secs = int(value or 15)
+            if driver:
+                self._watch_reel(driver, watch_secs)
+            self._log(job_id, f"Watched reel for {watch_secs}s")
+        elif action == "profile_visit":
+            if driver and value:
+                driver.execute_script("mobile: deepLink", {"url": value, "package": INSTAGRAM_PACKAGE})
+            self._log(job_id, f"Profile visit: {value}")
         elif action == "skip":
             self._log(job_id, f"Step skipped: {value}")
         elif action == "capture_evidence":
@@ -130,6 +143,23 @@ class ActionEngine:
         driver = webdriver.Remote(command_executor=appium_server_url, options=options)
         self._drivers[device_id] = driver
         return driver
+
+    @staticmethod
+    def _tap_save(driver: Any) -> None:
+        candidates = [
+            "//android.widget.ImageView[contains(@content-desc,'Save')]",
+            "//android.widget.Button[contains(@content-desc,'Save')]",
+        ]
+        for xpath in candidates:
+            elems = driver.find_elements("xpath", xpath)
+            if elems:
+                elems[0].click()
+                return
+
+    @staticmethod
+    def _watch_reel(driver: Any, watch_seconds: int = 15) -> None:
+        """Keep the Reel open for watch_seconds to boost completion-rate signal."""
+        time.sleep(max(1, watch_seconds))
 
     @staticmethod
     def _tap_like(driver: Any) -> None:

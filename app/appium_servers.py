@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from datetime import datetime, timezone
 
@@ -40,7 +41,23 @@ def start_server_for_device(device_id: str, host: str = "127.0.0.1", port: int =
             "status": "already_running",
         }
 
-    cmd = ["appium", "--address", host, "--port", str(port)]
+    # Resolve the appium executable; on Windows npm installs a .cmd wrapper
+    appium_exe = shutil.which("appium") or shutil.which("appium.cmd")
+    if appium_exe is None and os.name == "nt":
+        # npm global bin may not be on PATH — derive it from `npm prefix -g`
+        try:
+            npm_prefix = subprocess.check_output(
+                ["npm", "prefix", "-g"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            candidate = os.path.join(npm_prefix, "appium.cmd")
+            if os.path.isfile(candidate):
+                appium_exe = candidate
+        except Exception:
+            pass
+    if appium_exe is None:
+        raise RuntimeError("Appium CLI not found. Install globally: npm i -g appium")
+
+    cmd = [appium_exe, "--address", host, "--port", str(port)]
     creationflags = 0
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS

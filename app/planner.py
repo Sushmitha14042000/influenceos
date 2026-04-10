@@ -90,8 +90,9 @@ def plan_batch(batch_id: int) -> int:
             steps.append((3, "like", None, 900, 1800))
             steps.append((4, "capture_evidence", None, 300, 700))
         elif intent == Intent.COMMENT:
-            steps.append((3, "comment", comment_template, 1100, 2200))
-            steps.append((4, "capture_evidence", None, 300, 700))
+            steps.append((3, "like", None, 900, 1800))
+            steps.append((4, "comment", comment_template, 1100, 2200))
+            steps.append((5, "capture_evidence", None, 300, 700))
         elif intent == Intent.REPOST:
             steps.append((3, "repost", None, 1200, 2600))
             steps.append((4, "capture_evidence", None, 300, 700))

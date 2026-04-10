@@ -85,7 +85,7 @@ class ActionEngine:
             self._log(job_id, f"Comment action completed: {value}")
         elif action == "repost":
             if driver:
-                self._tap_share(driver)
+                self._tap_repost(driver)
             self._log(job_id, "Repost action completed")
         elif action == "share":
             if driver:
@@ -133,41 +133,279 @@ class ActionEngine:
 
     @staticmethod
     def _tap_like(driver: Any) -> None:
-        candidates = [
+        id_candidates = [
+            "com.instagram.android:id/row_feed_button_like",
+        ]
+        xpath_candidates = [
             "//android.widget.ImageView[contains(@content-desc,'Like')]",
             "//android.widget.Button[contains(@content-desc,'Like')]",
+            "//*[contains(@content-desc,'Like')]",
         ]
-        for xpath in candidates:
-            elems = driver.find_elements("xpath", xpath)
-            if elems:
-                elems[0].click()
-                return
+
+        last_error: Exception | None = None
+        for _ in range(4):
+            for element_id in id_candidates:
+                elems = driver.find_elements("id", element_id)
+                if elems:
+                    try:
+                        ActionEngine._tap_element(driver, elems[0])
+                        return
+                    except Exception as exc:
+                        last_error = exc
+
+            for xpath in xpath_candidates:
+                elems = driver.find_elements("xpath", xpath)
+                if elems:
+                    try:
+                        ActionEngine._tap_element(driver, elems[0])
+                        return
+                    except Exception as exc:
+                        last_error = exc
+
+            # If not yet visible/clickable, try a short scroll and retry.
+            try:
+                size = driver.get_window_size()
+                driver.execute_script(
+                    "mobile: scrollGesture",
+                    {
+                        "left": 10,
+                        "top": 10,
+                        "width": max(size.get("width", 100) - 20, 50),
+                        "height": max(size.get("height", 200) - 20, 80),
+                        "direction": "down",
+                        "percent": 0.45,
+                    },
+                )
+            except Exception as exc:
+                last_error = exc
+            time.sleep(0.4)
+
+        if last_error:
+            raise RuntimeError(f"Like button found but click failed: {last_error}") from last_error
+        raise RuntimeError("Like button not found on current screen")
+
+    @staticmethod
+    def _tap_repost(driver: Any) -> None:
+        # After comment flow, keyboard/sheet can block repost controls.
+        ActionEngine._navigate_back(driver, attempts=2, delay=0.8)
+
+        xpath_candidates = [
+            "(//android.widget.Button[@resource-id='com.instagram.android:id/reposts_ufi_icon']/android.view.ViewGroup/android.widget.ImageView)",
+            "//*[@resource-id='com.instagram.android:id/reposts_ufi_icon']",
+            "//*[contains(@content-desc,'Repost')]",
+        ]
+
+        last_error: Exception | None = None
+        for _ in range(4):
+            for xpath in xpath_candidates:
+                elems = driver.find_elements("xpath", xpath)
+                if elems:
+                    try:
+                        ActionEngine._tap_element(driver, elems[0])
+                        # Close repost sheet and return to the post screen.
+                        try:
+                            time.sleep(0.6)
+                            driver.back()
+                        except Exception:
+                            pass
+                        return
+                    except Exception as exc:
+                        last_error = exc
+            time.sleep(0.35)
+
+        if last_error:
+            raise RuntimeError(f"Repost button found but click failed: {last_error}") from last_error
+        raise RuntimeError("Repost button not found on current screen")
+
+    @staticmethod
+    def _navigate_back(driver: Any, attempts: int = 1, delay: float = 0.5) -> None:
+        for _ in range(attempts):
+            try:
+                driver.back()
+                time.sleep(delay)
+            except Exception:
+                break
+
+    @staticmethod
+    def _tap_element(driver: Any, element: Any) -> None:
+        try:
+            element.click()
+            return
+        except Exception:
+            pass
+
+        rect = element.rect or {}
+        x = int(rect.get("x", 0) + rect.get("width", 0) / 2)
+        y = int(rect.get("y", 0) + rect.get("height", 0) / 2)
+        if x <= 0 or y <= 0:
+            raise RuntimeError("Element tap fallback failed: invalid bounds")
+        driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
 
     @staticmethod
     def _tap_share(driver: Any) -> None:
         candidates = [
             "//android.widget.ImageView[contains(@content-desc,'Share')]",
             "//android.widget.Button[contains(@content-desc,'Share')]",
+            "//*[contains(@content-desc,'Share')]",
+            "//*[contains(@text,'Share')]",
+            "//*[contains(@content-desc,'Repost')]",
+            "//*[contains(@text,'Repost')]",
         ]
-        for xpath in candidates:
-            elems = driver.find_elements("xpath", xpath)
-            if elems:
-                elems[0].click()
-                return
+        last_error: Exception | None = None
+        for _ in range(4):
+            for xpath in candidates:
+                elems = driver.find_elements("xpath", xpath)
+                if elems:
+                    try:
+                        ActionEngine._tap_element(driver, elems[0])
+                        return
+                    except Exception as exc:
+                        last_error = exc
+            time.sleep(0.35)
+
+        if last_error:
+            raise RuntimeError(f"Share/Repost button found but click failed: {last_error}") from last_error
+        raise RuntimeError("Share/Repost button not found on current screen")
 
     @staticmethod
     def _post_comment(driver: Any, text: str) -> None:
-        comment_buttons = driver.find_elements("xpath", "//android.widget.ImageView[contains(@content-desc,'Comment')]")
-        if comment_buttons:
-            comment_buttons[0].click()
+        # Try proven Instagram comment button id first.
+        opener_tapped = False
+        try:
+            comment_btn = driver.find_element("id", "com.instagram.android:id/row_feed_button_comment")
+            ActionEngine._tap_element(driver, comment_btn)
+            opener_tapped = True
+        except Exception:
+            pass
 
-        text_boxes = driver.find_elements("xpath", "//android.widget.EditText")
-        if text_boxes:
-            text_boxes[0].send_keys(text)
+        if not opener_tapped:
+            comment_openers = [
+                "//android.widget.ImageView[contains(@content-desc,'Comment')]",
+                "//android.widget.Button[contains(@content-desc,'Comment')]",
+                "//*[contains(@content-desc,'Comment')]",
+                "//*[contains(@text,'Comment')]",
+            ]
+            for _ in range(4):
+                for xpath in comment_openers:
+                    elems = driver.find_elements("xpath", xpath)
+                    if elems:
+                        try:
+                            ActionEngine._tap_element(driver, elems[0])
+                            opener_tapped = True
+                            break
+                        except Exception:
+                            continue
+                if opener_tapped:
+                    break
+                time.sleep(0.35)
 
-        post_buttons = driver.find_elements("xpath", "//android.widget.Button[@text='Post']")
-        if post_buttons:
-            post_buttons[0].click()
+        if not opener_tapped:
+            raise RuntimeError("Comment button not found or not tappable")
+
+        # Some Instagram builds open a bottom sheet where we must tap
+        # "Add a comment..." before an EditText appears.
+        composer_triggers = [
+            "//*[contains(@text,'Add a comment')]",
+            "//*[contains(@content-desc,'Add a comment')]",
+            "//*[contains(@text,'Write a comment')]",
+            "//*[contains(@content-desc,'Write a comment')]",
+        ]
+        for xpath in composer_triggers:
+            elems = driver.find_elements("xpath", xpath)
+            if elems:
+                try:
+                    ActionEngine._tap_element(driver, elems[0])
+                    break
+                except Exception:
+                    continue
+
+        editable_candidates = [
+            "//android.widget.EditText[@enabled='true']",
+            "//*[@class='android.widget.EditText' and @enabled='true']",
+            "//*[contains(@resource-id,'comment') and self::android.widget.EditText and @enabled='true']",
+        ]
+        fallback_candidates = [
+            "//*[@focusable='true' and @enabled='true' and (self::android.widget.EditText or self::android.widget.TextView)]",
+        ]
+
+        typed = False
+        last_type_error: Exception | None = None
+
+        # If keyboard is already up, active element is often the true input field.
+        try:
+            active = driver.switch_to.active_element
+            active.send_keys(text)
+            typed = True
+        except Exception as exc:
+            last_type_error = exc
+
+        for _ in range(8):
+            if typed:
+                break
+            candidate_groups = [editable_candidates, fallback_candidates]
+            for group in candidate_groups:
+                for xpath in group:
+                    elements = driver.find_elements("xpath", xpath)
+                    for element in elements:
+                        try:
+                            ActionEngine._tap_element(driver, element)
+                        except Exception:
+                            # Keep trying; some elements are visible but not tappable.
+                            pass
+                        try:
+                            element.clear()
+                        except Exception:
+                            pass
+                        try:
+                            element.send_keys(text)
+                            typed = True
+                            break
+                        except Exception as exc:
+                            last_type_error = exc
+                    if typed:
+                        break
+                if typed:
+                    break
+            if typed:
+                break
+            time.sleep(0.3)
+
+        if not typed:
+            if last_type_error:
+                raise RuntimeError(f"Comment input found but not editable: {last_type_error}") from last_type_error
+            raise RuntimeError("Comment input box not found")
+
+        submit_candidates = [
+            ("accessibility id", "Post"),
+            "//android.widget.Button[@text='Post']",
+            "//android.widget.TextView[@text='Post']",
+            "//*[contains(@content-desc,'Post')]",
+            "//*[contains(@text,'Post')]",
+        ]
+        for _ in range(4):
+            # Accessibility id path.
+            try:
+                post_btn = driver.find_element("accessibility id", "Post")
+                ActionEngine._tap_element(driver, post_btn)
+                time.sleep(0.8)
+                ActionEngine._navigate_back(driver, attempts=2, delay=0.6)
+                return
+            except Exception:
+                pass
+
+            for xpath in submit_candidates[1:]:
+                elems = driver.find_elements("xpath", xpath)
+                if elems:
+                    try:
+                        ActionEngine._tap_element(driver, elems[0])
+                        time.sleep(0.8)
+                        ActionEngine._navigate_back(driver, attempts=2, delay=0.6)
+                        return
+                    except Exception:
+                        continue
+            time.sleep(0.3)
+
+        raise RuntimeError("Post comment submit button not found or not tappable")
 
     def close(self) -> None:
         for driver in self._drivers.values():

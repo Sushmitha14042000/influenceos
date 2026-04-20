@@ -1,6 +1,9 @@
+
 from __future__ import annotations
+import re
 
 from app.db import execute, fetch_all
+import json
 from app.models import Intent
 
 
@@ -21,16 +24,20 @@ MANDATORY_FIELDS: dict[str, list[str]] = {
 def _insert_steps(job_id: int, steps: list[tuple[int, str, str | None, int, int]]) -> None:
     execute("DELETE FROM planned_steps WHERE job_id = ?", [job_id])
     for step in steps:
+        value = step[2]
+        if isinstance(value, dict):
+            value = json.dumps(value)
         execute(
             """
             INSERT INTO planned_steps(job_id, step_order, action, value, min_wait_ms, max_wait_ms)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            [job_id, step[0], step[1], step[2], step[3], step[4]],
+            [job_id, step[0], step[1], value, step[3], step[4]],
         )
 
 
 def plan_batch(batch_id: int) -> int:
+
     jobs = fetch_all(
         "SELECT * FROM jobs WHERE batch_id = ? AND status IN ('pending', 'planned') ORDER BY priority DESC, id ASC",
         [batch_id],
@@ -67,43 +74,70 @@ def plan_batch(batch_id: int) -> int:
             planned_count += 1
             continue
 
+
+
+
+
+        # Custom workflow: open, scroll randomly, scroll reels, close, open, scroll, redirect, perform intent
         steps: list[tuple[int, str, str | None, int, int]] = [
-            (1, "launch", None, 700, 1800),
-            (2, "open_url", post_url, 1200, 2600),
+            (1, "open_instagram", None, 700, 1800),
+            (2, "scroll_randomly", "60", 1000, 2000),
+            (3, "scroll_reels", "30", 1000, 2000),
+            (4, "close_instagram", None, 700, 1800),
+            (5, "open_instagram", None, 700, 1800),
+            (6, "scroll_randomly", "30", 1000, 2000),
+            (7, "redirect_url", post_url, 1200, 2600),
+            (8, "wait", "post_load", 3000, 4000),
         ]
 
-        if intent == Intent.REVIEW:
-            steps.extend([
-                (3, "scroll", "2", 600, 1400),
-                (4, "capture_evidence", None, 300, 700),
-            ])
-        elif intent == Intent.LAUNCH:
-            pass
+        main_action_idx = len(steps) + 1
+        insights_idx = main_action_idx + 1
+        profile_idx = insights_idx + 1
+        wait_idx = profile_idx + 1
+        scroll_idx = wait_idx + 1
+        close_idx = scroll_idx + 1
+
+        def add_profile_steps():
+            steps.append((profile_idx, "view_profile", post_url, 1000, 2000))
+            steps.append((wait_idx, "wait", "profile_load", 2000, 3000))
+            steps.append((scroll_idx, "scroll_randomly", "30", 1000, 2000))
+            steps.append((close_idx, "close_instagram", None, 700, 1800))
+
+        def add_back_step(idx):
+            steps.append((idx, "back", None, 200, 400))
+
+        if intent == Intent.LIKE:
+            steps.append((main_action_idx, "like", None, 900, 1800))
+            add_back_step(main_action_idx + 0.1)
+            steps.append((insights_idx, "capture_insights", "like", 300, 700))
+            add_profile_steps()
+        elif intent == Intent.COMMENT:
+            steps.append((main_action_idx, "comment", {"url": post_url, "text": comment_template}, 1100, 2200))
+            add_back_step(main_action_idx + 0.1)
+            steps.append((insights_idx, "capture_insights", "comment", 300, 700))
+            add_profile_steps()
+        elif intent == Intent.REPOST:
+            steps.append((main_action_idx, "repost", post_url, 1200, 2600))
+            add_back_step(main_action_idx + 0.1)
+            steps.append((insights_idx, "capture_insights", "repost", 300, 700))
+            add_profile_steps()
+        elif intent == Intent.SHARE:
+            steps.append((main_action_idx, "share", None, 1200, 2600))
+            add_back_step(main_action_idx + 0.1)
+            steps.append((insights_idx, "capture_insights", "share", 300, 700))
+            add_profile_steps()
+        elif intent == Intent.LIKE_AND_COMMENT:
+            steps.append((main_action_idx, "like", None, 900, 1800))
+            add_back_step(main_action_idx + 0.1)
+            steps.append((insights_idx, "comment", {"url": post_url, "text": comment_template}, 1100, 2200))
+            add_back_step(insights_idx + 0.1)
+            steps.append((scroll_idx, "capture_insights", "like_and_comment", 300, 700))
+            add_profile_steps()
         elif intent == Intent.TERMINATE:
             steps = [(1, "terminate", None, 200, 600)]
-        elif intent == Intent.POST:
-            steps.append((3, "capture_evidence", None, 300, 700))
-        elif intent == Intent.SCROLL:
-            steps.append((3, "scroll", "4", 900, 1800))
-            steps.append((4, "capture_evidence", None, 300, 700))
-        elif intent == Intent.LIKE:
-            steps.append((3, "like", None, 900, 1800))
-            steps.append((4, "capture_evidence", None, 300, 700))
-        elif intent == Intent.COMMENT:
-            steps.append((3, "like", None, 900, 1800))
-            steps.append((4, "comment", comment_template, 1100, 2200))
-            steps.append((5, "capture_evidence", None, 300, 700))
-        elif intent == Intent.REPOST:
-            steps.append((3, "repost", None, 1200, 2600))
-            steps.append((4, "capture_evidence", None, 300, 700))
-        elif intent == Intent.SHARE:
-            steps.append((3, "share", None, 1200, 2600))
-            steps.append((4, "capture_evidence", None, 300, 700))
-        elif intent == Intent.LIKE_AND_COMMENT:
-            steps.append((3, "like", None, 900, 1800))
-            ai_comment = f"Thanks for sharing this: {description[:90]}"
-            steps.append((4, "comment", ai_comment, 1100, 2200))
-            steps.append((5, "capture_evidence", None, 300, 700))
+        # Add evidence step for all except terminate
+        if intent != Intent.TERMINATE:
+            steps.append((199, "capture_evidence", None, 300, 700))
 
         _insert_steps(int(job["id"]), steps)
         execute("UPDATE jobs SET status = 'planned', error_message = NULL WHERE id = ?", [job["id"]])

@@ -49,6 +49,17 @@ def init_db() -> None:
                 FOREIGN KEY(device_id) REFERENCES devices(device_id)
             );
 
+            CREATE TABLE IF NOT EXISTS profiles (
+                account_id TEXT PRIMARY KEY,
+                name TEXT,
+                email TEXT,
+                phone TEXT,
+                birthday TEXT,
+                location TEXT,
+                role TEXT,
+                favorites_json TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS jobs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 batch_id INTEGER NOT NULL,
@@ -87,6 +98,17 @@ def init_db() -> None:
                 message TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(job_id) REFERENCES jobs(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id INTEGER,
+                post_id TEXT,
+                event TEXT,
+                views INTEGER,
+                likes INTEGER,
+                comments INTEGER,
+                timestamp TEXT
             );
             """
         )

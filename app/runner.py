@@ -13,7 +13,7 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def run_batch(batch_id: int, use_mock: bool = True) -> dict:
+def run_batch(batch_id: int, use_mock: bool = False) -> dict:
     # Keep run order safe and deterministic even when called directly from API/UI.
     validate_batch_device_assignments(batch_id)
     plan_batch(batch_id)

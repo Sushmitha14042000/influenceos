@@ -1,5 +1,43 @@
 import { useEffect, useMemo, useState } from 'react'
+// --- InsightsTab component for View Insights tab ---
+function InsightsTab() {
+  const [jobIds, setJobIds] = useState([]);
+  const [selectedJobId, setSelectedJobId] = useState("");
+  const [modalJobId, setModalJobId] = useState(null);
+
+  useEffect(() => {
+    get('/insights/db-job-ids').then(setJobIds).catch(() => setJobIds([]));
+  }, []);
+
+  return (
+    <div style={{ maxWidth: 400 }}>
+      <label>Job ID:&nbsp;</label>
+      <select
+        value={selectedJobId}
+        onChange={e => setSelectedJobId(e.target.value)}
+        style={{ marginRight: 8, width: 160 }}
+      >
+        <option value="">Select Job ID</option>
+        {jobIds.map(id => (
+          <option key={id} value={id}>{id}</option>
+        ))}
+      </select>
+      <button
+        className="btn-primary"
+        disabled={!selectedJobId}
+        onClick={() => setModalJobId(Number(selectedJobId))}
+      >
+        View Insights
+      </button>
+      {modalJobId !== null && (
+        <InsightsModal jobId={modalJobId} onClose={() => setModalJobId(null)} />
+      )}
+    </div>
+  );
+}
 import { get, postFile, postForm } from './api'
+import InsightsModal from './InsightsModal'
+import DashboardTab from './DashboardTab'
 
 function StatCard({ label, value }) {
   return (
@@ -66,6 +104,7 @@ export default function App() {
   const [selectedDevice, setSelectedDevice] = useState('')
   const [selectedDeviceIds, setSelectedDeviceIds] = useState([])
   const [activeView, setActiveView] = useState('import')
+  const [insightsJobId, setInsightsJobId] = useState(null)
   const [activeMonitorView, setActiveMonitorView] = useState('jobs')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [search, setSearch] = useState('')
@@ -513,22 +552,41 @@ export default function App() {
         </div>
 
         {activeMonitorView === 'jobs' ? (
-          <DataTable
-            columns={[
-              'id',
-              'batch_id',
-              'account_id',
-              'device_id',
-              'intent',
-              'status',
-              'priority',
-              'error_message',
-              'evidence_path',
-              'created_at'
-            ]}
-            rows={filteredJobs}
-            emptyLabel="No jobs imported yet."
-          />
+          <div>
+            <DataTable
+              columns={[
+                'id',
+                'batch_id',
+                'account_id',
+                'device_id',
+                'intent',
+                'status',
+                'priority',
+                'error_message',
+                'evidence_path',
+                'created_at',
+                'actions',
+                'insights_before_after',
+              ]}
+              rows={filteredJobs.map(job => ({
+                ...job,
+                actions: (
+                  <button className="btn-sm" onClick={() => setInsightsJobId(job.id)}>
+                    View Insights
+                  </button>
+                ),
+                insights_before_after: (
+                  <button className="btn-sm btn-secondary" onClick={() => setInsightsJobId(job.id)}>
+                    View Insights (Before/After)
+                  </button>
+                )
+              }))}
+              emptyLabel="No jobs imported yet."
+            />
+            {insightsJobId && (
+              <InsightsModal jobId={insightsJobId} onClose={() => setInsightsJobId(null)} />
+            )}
+          </div>
         ) : null}
 
         {activeMonitorView === 'events' ? (
@@ -591,6 +649,12 @@ export default function App() {
           <button className={activeView === 'monitor' ? 'tab active' : 'tab'} onClick={() => setActiveView('monitor')}>
             Monitoring
           </button>
+          <button className={activeView === 'insights' ? 'tab active' : 'tab'} onClick={() => setActiveView('insights')}>
+            View Insights
+          </button>
+          <button className={activeView === 'dashboard' ? 'tab active' : 'tab'} onClick={() => setActiveView('dashboard')}>
+            Dashboard
+          </button>
           <div className="spacer" />
           <div className="status-inline">
             <span>Batch: {selectedBatch || 'None'}</span>
@@ -604,6 +668,15 @@ export default function App() {
       {activeView === 'workflow' ? renderWorkflowTab() : null}
       {activeView === 'devices' ? renderDevicesTab() : null}
       {activeView === 'monitor' ? renderMonitorTab() : null}
+
+      {activeView === 'insights' ? (
+        <section className="panel">
+          <SectionTitle title="View Insights" subtitle="Fetch post insights by Job ID." />
+          <InsightsTab />
+        </section>
+      ) : null}
+
+      {activeView === 'dashboard' ? <DashboardTab /> : null}
     </div>
   )
 }
